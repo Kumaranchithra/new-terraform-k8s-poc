@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
       - name: python-app
-        image: gcr.io/your-gcp-project-id/python-app:latest
+        image: gcr.io/forward-vial-451206-d3/python-app:latest
         ports:
         - containerPort: 5000
