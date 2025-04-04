@@ -1,5 +1,5 @@
 provider "google" {
-  credentials = file("/home/your-user/jenkins-deployer.json")
+  credentials = file("/home/praveenkumar.r/jenkins-deployer-key.json")
   project = var.project_id
   region  = var.region
   zone    = var.zone
