@@ -1,29 +1,80 @@
 pipeline {
-  agent any
-  environment {
-    PROJECT_ID = 'your-gcp-project-id'
-    CLUSTER_NAME = 'your-gke-cluster-name'
-    ZONE = 'us-central1-a'
-    IMAGE = "gcr.io/${PROJECT_ID}/python-app"
-  }
-  stages {
-    stage('Build & Push Docker Image') {
-      steps {
-        sh '''
-        docker build -t $IMAGE:latest app/
-        gcloud auth configure-docker --quiet
-        docker push $IMAGE:latest
-        '''
-      }
+    agent any
+
+    environment {
+        GCP_PROJECT_ID = 'forward-vial-451206-d3' // Replace with your GCP project ID
+        GCP_REGION = 'asia-south1' // Replace with your region, e.g., 'us-central1'
+        DOCKER_IMAGE_NAME = 'asia-south1-docker.pkg.dev/ken-cloud-436408/jenkins-poc-admission-int/poc-1' // Update the image name without :latest
+        DEPLOYMENT_YAML = './deployment-2024.yaml' // Path to your deployment YAML file
+        GITHUB_CREDENTIALS_ID = '7ac3f50e-bb0f-4c8c-99ce-85ab1adf4ca3' // Your GitHub credentials ID
+        GCP_CREDENTIALS_ID = '8ebad236-b871-458d-a3f0-96fab43593f8' // Your GCP service account credentials ID
     }
-    stage('Deploy to GKE') {
-      steps {
-        sh '''
-        gcloud container clusters get-credentials $CLUSTER_NAME --zone $ZONE --project $PROJECT_ID
-        kubectl apply -f k8s/deployment.yaml
-        kubectl apply -f k8s/service.yaml
-        '''
-      }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                script {
+                    // Checkout the code from the private GitHub repository
+                    checkout([$class: 'GitSCM', branches: [[name: '*/vvi-stage']],
+                        userRemoteConfigs: [[url: 'https://github.com/ken42-tech/admission-integration.git',
+                        credentialsId: "${GITHUB_CREDENTIALS_ID}"]]])
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Authenticate to GCP
+                    withCredentials([file(credentialsId: "${GCP_CREDENTIALS_ID}", variable: 'GCP_KEY')]) {
+                        sh 'gcloud auth activate-service-account --key-file=${GCP_KEY}'
+                        sh 'gcloud config set project ${GCP_PROJECT_ID}'
+                        sh 'gcloud auth configure-docker asia-south1-docker.pkg.dev' // Authenticate Docker
+
+                        // Build the Docker image
+                        def dockerImage = docker.build("${DOCKER_IMAGE_NAME}:${env.BUILD_ID}")
+                        dockerImage.push() // Push the image to the registry
+                    }
+                }
+            }
+        }
+
+        stage('Update Deployment YAML') {
+            steps {
+                script {
+                    // Update the deployment.yaml file with the new image name
+                    def newImageName = "${DOCKER_IMAGE_NAME}:${env.BUILD_ID}" // Use the build ID for tagging
+                    sh "sed -i 's|image:.*|image: ${newImageName}|' ${DEPLOYMENT_YAML}"
+                }
+            }
+        }
+
+        stage('Deploy to GKE') {
+            steps {
+                withCredentials([file(credentialsId: "${GCP_CREDENTIALS_ID}", variable: 'GCP_KEY')]) {
+                    script {
+                        // Authenticate to GCP
+                        sh 'gcloud auth activate-service-account --key-file=${GCP_KEY}'
+                        sh 'gcloud config set project ${GCP_PROJECT_ID}'
+                        sh 'gcloud config set compute/zone ${GCP_REGION}'
+
+                        // Get credentials for the GKE cluster
+                        sh 'gcloud container clusters get-credentials kenverse-dev-stage --zone asia-south1-a --project ${GCP_PROJECT_ID}'
+
+                        // Deploy the updated deployment file to GKE
+                        sh "kubectl apply -f ${DEPLOYMENT_YAML}"
+                    }
+                }
+            }
+        }
     }
-  }
+
+    post {
+        success {
+            echo 'Deployment Successful!'
+        }
+        failure {
+            echo 'Deployment Failed!'
+        }
+    }
 }
