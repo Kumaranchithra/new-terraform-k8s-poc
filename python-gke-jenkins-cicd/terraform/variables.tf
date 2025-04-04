@@ -1,4 +1,6 @@
-variable "project_id" {}
+variable "project_id" {
+  default = "forward-vial-451206-d3"
+}
 variable "region" {
   default = "us-central1"
 }
